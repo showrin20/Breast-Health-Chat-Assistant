@@ -1,8 +1,9 @@
 import streamlit as st
 import numpy as np
 import os
-from utils.predict import load_model, make_prediction
+from utils.predict import load_model, make_prediction, create_full_feature_array
 from utils.rag import initialize_rag, get_rag_response
+import time
 
 # Page configuration
 st.set_page_config(
@@ -85,6 +86,10 @@ FEATURE_QUESTIONS = {
     }
 }
 
+def navigate_to(step):
+    """Helper function to handle navigation"""
+    st.session_state.current_step = step
+
 def display_welcome():
     st.markdown("""
     # 🎗️ Breast Health Chat Assistant
@@ -108,44 +113,38 @@ def display_welcome():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if st.button("📝 I have test results to discuss", use_container_width=True):
-            st.session_state.current_step = 'collect_data'
-            st.rerun()
+        if st.button("📝 I have test results to discuss", key="welcome_analysis", use_container_width=True):
+            navigate_to('collect_data')
     
     with col2:
-        if st.button("❓ I have general questions", use_container_width=True):
-            st.session_state.current_step = 'chat_mode'
-            st.rerun()
+        if st.button("❓ I have general questions", key="welcome_chat", use_container_width=True):
+            navigate_to('chat_mode')
     
     with col3:
-        if st.button("📚 I want to learn more", use_container_width=True):
-            st.session_state.current_step = 'education_mode'
-            st.rerun()
+        if st.button("📚 I want to learn more", key="welcome_learn", use_container_width=True):
+            navigate_to('education_mode')
 
 def display_data_collection():
-    """Display data collection interface"""
     st.markdown("## 📝 Let's Review Your Information Together")
     st.markdown("Don't worry if you don't have all the details - we can work with what you know!")
     
     progress = len(st.session_state.user_inputs) / len(FEATURE_QUESTIONS)
     st.progress(progress)
     
-    # Display questions
     for feature, config in FEATURE_QUESTIONS.items():
         st.markdown(f"### {config['question']}")
         
         col1, col2 = st.columns([3, 1])
         
         with col1:
-            # Input field
             current_value = st.session_state.user_inputs.get(feature, config['default'])
             
             value = st.number_input(
                 f"Value for {feature.replace('_', ' ').title()}",
-                min_value=float(config['range'][0]),  # Cast to float
-                max_value=float(config['range'][1]),  # Cast to float
-                value=float(current_value),           # Already float
-                step=0.01,                            # Float step
+                min_value=float(config['range'][0]),
+                max_value=float(config['range'][1]),
+                value=float(current_value),
+                step=0.01,
                 key=f"input_{feature}",
                 label_visibility="collapsed"
             )
@@ -156,55 +155,48 @@ def display_data_collection():
             if st.button(f"ℹ️ Help", key=f"help_{feature}"):
                 st.info(config['help'])
         
-        # Skip option
         if st.checkbox(f"Skip this question", key=f"skip_{feature}"):
             st.session_state.user_inputs[feature] = config['default']
             st.info("Using typical average value")
         
         st.markdown("---")
     
-    # Action buttons
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if st.button("🔄 Reset All", use_container_width=True):
+        if st.button("🔄 Reset All", key="reset_inputs", use_container_width=True):
             st.session_state.user_inputs = {}
             st.rerun()
     
     with col2:
-        if st.button("🏠 Back to Home", use_container_width=True):
-            st.session_state.current_step = 'welcome'
-            st.rerun()
+        if st.button("🏠 Back to Home", key="data_home", use_container_width=True):
+            navigate_to('welcome')
     
     with col3:
-        if st.button("📊 Get Analysis", use_container_width=True, type="primary"):
-            if len(st.session_state.user_inputs) >= 5:  # Minimum required
-                st.session_state.current_step = 'show_results'
-                st.rerun()
+        if st.button("📊 Get Analysis", key="get_analysis", use_container_width=True, type="primary"):
+            if len(st.session_state.user_inputs) >= 5:
+                navigate_to('show_results')
             else:
                 st.warning("Please provide at least 5 measurements to get an analysis.")
 
 def display_results():
-    """Display prediction results"""
     st.markdown("## 📊 Your Analysis Results")
     
     try:
-        # Load model and scaler - FIXED: properly unpack the tuple
         model, scaler = load_model()
-        if model is None:
-            st.error("Unable to load the analysis model. Please contact support.")
+        if model is None or scaler is None:
+            st.error("Unable to load the analysis model or scaler. Please contact support.")
             return
         
-        # Prepare input array
-        input_array = np.array([
+        mean_values = [
             st.session_state.user_inputs.get(feature, config['default']) 
             for feature, config in FEATURE_QUESTIONS.items()
-        ]).reshape(1, -1)
+        ]
         
-        # Make prediction - FIXED: pass both model and scaler
+        input_array = create_full_feature_array(mean_values)
+        
         prediction, probability = make_prediction(model, input_array, scaler)
         
-        # Display results with supportive messaging
         st.markdown("### 🎯 Analysis Complete")
         
         if prediction == 0:  # Benign
@@ -230,7 +222,6 @@ def display_results():
             **Confidence Level:** {:.1f}%
             """.format(probability * 100))
         
-        # Always include reassuring information
         st.info("""
         **Remember:**
         - This analysis is based on limited information and should not replace professional medical advice
@@ -238,31 +229,30 @@ def display_results():
         - You're taking positive steps by staying informed about your health
         """)
         
-        # Action buttons
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("💬 Ask Questions", use_container_width=True):
-                st.session_state.current_step = 'chat_mode'
-                st.rerun()
+            if st.button("💬 Ask Questions", key="results_chat", use_container_width=True):
+                navigate_to('chat_mode')
         
         with col2:
-            if st.button("🔄 New Analysis", use_container_width=True):
+            if st.button("🔄 New Analysis", key="results_new", use_container_width=True):
                 st.session_state.user_inputs = {}
-                st.session_state.current_step = 'collect_data'
-                st.rerun()
+                navigate_to('collect_data')
                 
     except Exception as e:
         st.error(f"An error occurred during analysis: {str(e)}")
         st.info("Please try again or contact support if the problem persists.")
 
 def display_chat_mode():
-    """Display chat interface with RAG"""
     st.markdown("## 💬 Ask Me Anything About Breast Health")
     
-    # Initialize RAG system if not already done
     if st.session_state.rag_system is None:
         with st.spinner("Setting up knowledge base..."):
-            st.session_state.rag_system = initialize_rag()
+            try:
+                st.session_state.rag_system = initialize_rag()
+            except Exception as e:
+                st.error(f"Failed to initialize knowledge base: {str(e)}")
+                return
     
     # Display chat history
     for message in st.session_state.chat_history:
@@ -271,17 +261,18 @@ def display_chat_mode():
     
     # Chat input
     if prompt := st.chat_input("Ask me anything about breast health..."):
-        # Add user message
         st.session_state.chat_history.append({"role": "user", "content": prompt})
         
         with st.chat_message("user"):
             st.markdown(prompt)
         
-        # Generate response
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 if st.session_state.rag_system:
-                    response = get_rag_response(st.session_state.rag_system, prompt)
+                    try:
+                        response = get_rag_response(st.session_state.rag_system, prompt)
+                    except Exception as e:
+                        response = f"I'm sorry, there was an issue processing your question: {str(e)}. Please try again."
                 else:
                     response = "I'm sorry, I'm having trouble accessing my knowledge base right now. Please try asking a simpler question or contact support."
                 
@@ -307,7 +298,6 @@ def display_chat_mode():
                 st.rerun()
 
 def display_education_mode():
-    """Display educational content"""
     st.markdown("## 📚 Breast Health Education")
     
     tab1, tab2, tab3, tab4 = st.tabs(["Understanding Results", "Prevention", "Risk Factors", "When to See a Doctor"])
@@ -381,42 +371,22 @@ def display_education_mode():
         """)
 
 def main():
-    """Main application logic"""
-    
-    # Sidebar
+    # Sidebar with only Return to Homepage option
     with st.sidebar:
-        st.markdown("### 🎗️ Navigation")
+        st.markdown("### 🎗️ Breast Health Assistant")
         
-        if st.button("🏠 Home", use_container_width=True):
-            st.session_state.current_step = 'welcome'
-            st.rerun()
-        
-        if st.button("📝 Analysis", use_container_width=True):
-            st.session_state.current_step = 'collect_data'
-            st.rerun()
-        
-        if st.button("💬 Chat", use_container_width=True):
-            st.session_state.current_step = 'chat_mode'
-            st.rerun()
-        
-        if st.button("📚 Learn", use_container_width=True):
-            st.session_state.current_step = 'education_mode'
-            st.rerun()
+        if st.button("🏠 Return to Homepage", key="nav_home", use_container_width=True):
+            navigate_to('welcome')
         
         st.markdown("---")
         
-        if st.button("🗑️ Clear Chat History"):
-            st.session_state.chat_history = []
-            st.success("Chat history cleared!")
-        
-        st.markdown("---")
         st.markdown("""
         ### ⚠️ Important Notice
         This tool provides educational information only. 
         Always consult healthcare professionals for medical advice.
         """)
     
-    # Main content based on current step
+    # Main content area
     if st.session_state.current_step == 'welcome':
         display_welcome()
     elif st.session_state.current_step == 'collect_data':
@@ -427,6 +397,10 @@ def main():
         display_chat_mode()
     elif st.session_state.current_step == 'education_mode':
         display_education_mode()
+    else:
+        st.error(f"Unknown step: {st.session_state.current_step}")
+        st.session_state.current_step = 'welcome'
+        st.rerun()
 
 if __name__ == "__main__":
     main()

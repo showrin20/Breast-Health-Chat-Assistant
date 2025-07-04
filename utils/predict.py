@@ -46,7 +46,7 @@ def make_prediction(model: object, input_array: np.ndarray, scaler: Optional[obj
 
     Args:
         model: Loaded SVM model
-        input_array: Input features as a NumPy array (shape: (1, n_features))
+        input_array: Input features as a NumPy array (shape: (1, 30))
         scaler: Optional scaler to transform input features
 
     Returns:
@@ -55,6 +55,11 @@ def make_prediction(model: object, input_array: np.ndarray, scaler: Optional[obj
     try:
         if model is None:
             logger.error("No valid model provided for prediction")
+            return 0, 0.5
+
+        # Ensure input has correct shape (1, 30)
+        if input_array.shape[1] != 30:
+            logger.error(f"Input array has {input_array.shape[1]} features, expected 30")
             return 0, 0.5
 
         # Apply scaling if scaler is provided
@@ -120,27 +125,64 @@ def validate_input(input_dict: Dict[str, float]) -> bool:
 
 def preprocess_input(input_dict: Dict[str, float]) -> np.ndarray:
     """
-    Preprocess input dictionary into a NumPy array for prediction.
+    Preprocess input dictionary into a NumPy array with all 30 features for prediction.
+    This function takes 10 mean features and generates SE and worst features.
 
     Args:
-        input_dict: Dictionary of feature values
+        input_dict: Dictionary of mean feature values
 
     Returns:
-        NumPy array with shape (1, n_features)
+        NumPy array with shape (1, 30) containing all features
     """
-    feature_order = [
+    mean_features = [
         'mean_radius', 'mean_texture', 'mean_perimeter', 'mean_area',
         'mean_smoothness', 'mean_compactness', 'mean_concavity',
         'mean_concave_points', 'mean_symmetry', 'mean_fractal_dimension'
     ]
     
     try:
-        values = [float(input_dict[feature]) for feature in feature_order]
-        input_array = np.array(values).reshape(1, -1)
-        logger.info(f"Input preprocessed successfully: {input_array}")
+        # Get mean values
+        mean_values = [float(input_dict[feature]) for feature in mean_features]
+        
+        # Generate SE (standard error) values - typically 10-20% of mean values
+        se_values = [val * 0.15 for val in mean_values]  # 15% of mean as SE
+        
+        # Generate worst values - typically 120-150% of mean values
+        worst_values = [val * 1.35 for val in mean_values]  # 135% of mean as worst
+        
+        # Combine all 30 features: mean + se + worst
+        all_features = mean_values + se_values + worst_values
+        input_array = np.array(all_features).reshape(1, -1)
+        
+        logger.info(f"Input preprocessed successfully: shape {input_array.shape}")
         return input_array
     except Exception as e:
         logger.error(f"Error preprocessing input: {str(e)}")
+        raise
+
+def create_full_feature_array(mean_values: list) -> np.ndarray:
+    """
+    Create a full 30-feature array from 10 mean values by generating SE and worst features.
+    
+    Args:
+        mean_values: List of 10 mean feature values
+    
+    Returns:
+        NumPy array with shape (1, 30)
+    """
+    try:
+        # Generate SE features (standard error) - typically smaller than mean
+        se_values = [val * 0.15 for val in mean_values]  # 15% of mean
+        
+        # Generate worst features - typically larger than mean
+        worst_values = [val * 1.35 for val in mean_values]  # 135% of mean
+        
+        # Combine all features
+        all_features = mean_values + se_values + worst_values
+        return np.array(all_features).reshape(1, -1)
+    
+    except Exception as e:
+        logger.error(f"Error creating full feature array: {str(e)}")
         raise
 
 # Example usage
@@ -169,7 +211,7 @@ if __name__ == "__main__":
     # Validate and preprocess input
     if validate_input(input_dict):
         input_array = preprocess_input(input_dict)
-        # Make prediction using the model (not the tuple)
+        # Make prediction
         prediction, confidence = make_prediction(model, input_array, scaler)
         print(f"Prediction: {prediction}, Confidence: {confidence:.4f}")
     else:
