@@ -1,4 +1,3 @@
-## README.md
 # Breast Health Chat Assistant 🎗️
 
 A compassionate AI-powered chatbot that provides supportive breast health information and risk assessment using machine learning and retrieval-augmented generation (RAG).
